@@ -42,6 +42,7 @@ import { inspectElement, modifyStyle, resetModifications, getModificationHistory
 // Bun.spawn used instead of child_process.spawn (compiled bun binaries
 // fail posix_spawn on all executables including /bin/bash)
 import { safeUnlink, safeUnlinkQuiet, safeKill } from './error-handling';
+import { sanitizeBody, stripLoneSurrogateEscapes } from './sanitize';
 import { startSocksBridge, testUpstream, type BridgeHandle } from './socks-bridge';
 import { parseProxyConfig, toUpstreamConfig, ProxyConfigError } from './proxy-config';
 import { redactProxyUrl } from './proxy-redact';
@@ -1092,17 +1093,32 @@ async function handleCommandInternal(
   return { ...cr, result: sanitizeLoneSurrogates(cr.result) };
 }
 
-/** HTTP wrapper — converts CommandResult to Response */
-async function handleCommand(body: any, tokenInfo?: TokenInfo | null): Promise<Response> {
-  const cr = await handleCommandInternal(body, tokenInfo);
+/**
+ * Build the HTTP response from a CommandResult. Pure function so it can be
+ * unit-tested without spinning up the server (#1440). Defense in depth on top
+ * of handleCommandInternal's choke-point sanitization: this catches any
+ * \uXXXX JSON-escape surrogate forms that the raw-codepoint regex above
+ * misses when the body has already been JSON-stringified.
+ */
+export function buildCommandResponse(cr: CommandResult): Response {
   const contentType = cr.json ? 'application/json' : 'text/plain';
-  return new Response(cr.result, {
+  const safeBody = typeof cr.result === 'string' ? sanitizeBody(cr.result, !!cr.json) : cr.result;
+  return new Response(safeBody, {
     status: cr.status,
     headers: { 'Content-Type': contentType, ...cr.headers },
   });
 }
 
-// Module-level shutdown function deleted in v1.35.0.0; it now lives inside
+/** HTTP wrapper — converts CommandResult to Response. Used by the /command
+ * route dispatcher (line ~2158). The wrapper layer exists so
+ * `buildCommandResponse` is independently unit-testable (v1.38.1.0).
+ */
+async function handleCommand(body: any, tokenInfo?: TokenInfo | null): Promise<Response> {
+  const cr = await handleCommandInternal(body, tokenInfo);
+  return buildCommandResponse(cr);
+}
+
+// Module-level shutdown function deleted in v1.39.0.0; it now lives inside
 // the buildFetchHandler closure so it closes the cfg-provided browserManager.
 // Signal handlers below call activeShutdown which buildFetchHandler assigns.
 
@@ -1979,10 +1995,13 @@ export function buildFetchHandler(cfg: ServerConfig): ServerHandle {
             tokenInfo,
             { skipRateCheck: true, skipActivity: true },
           );
+          // Sanitize lone surrogates per-result (#1440 — /batch bypasses the
+          // handleCommand chokepoint, so it needs its own sanitization).
+          const safeResult = typeof cr.result === 'string' ? sanitizeBody(cr.result, !!cr.json) : cr.result;
           results.push({
             index: i,
             status: cr.status,
-            result: cr.result,
+            result: safeResult,
             command: cmd.command,
             tabId: cmd.tabId,
           });
@@ -2002,13 +2021,17 @@ export function buildFetchHandler(cfg: ServerConfig): ServerHandle {
           clientId: tokenInfo?.clientId,
         });
 
-        return new Response(JSON.stringify({
+        // Sanitize the JSON envelope a second time (defense in depth) — catches
+        // any \uXXXX escape sequences for lone surrogates that survived the
+        // per-result pass.
+        const batchBody = stripLoneSurrogateEscapes(JSON.stringify({
           results,
           duration,
           total: commands.length,
           succeeded: results.filter(r => r.status === 200).length,
           failed: results.filter(r => r.status !== 200).length,
-        }), {
+        }));
+        return new Response(batchBody, {
           status: 200,
           headers: { 'Content-Type': 'application/json' },
         });
