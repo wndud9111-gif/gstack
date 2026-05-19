@@ -392,8 +392,14 @@ export class BrowserManager {
       if (err?.code !== 'ENOENT' && err?.code !== 'EACCES') throw err;
     }
 
-    // Build custom user agent: keep Chrome version for site compatibility,
-    // but replace "Chrome for Testing" branding with "GStackBrowser"
+    // Build custom user agent: report as stock Chrome with the version
+    // matching the underlying Chromium binary. D6 (codex #18 correction):
+    // the previous "GStackBrowser" branding suffix was itself a high-entropy
+    // classifier — sites grepping UA for known browser strings caught us
+    // immediately. Branding still lives in the wrapper .app name + Dock icon
+    // + tray; it does NOT need to be in the UA string for the product to be
+    // "GBrowser." Removing it resolves the "looks like Chrome but identifies
+    // as GStackBrowser" contradiction codex flagged.
     let customUA: string | undefined;
     if (!this.customUserAgent) {
       // Detect Chrome version from the Chromium binary
@@ -406,13 +412,20 @@ export class BrowserManager {
         // Output like: "Google Chrome for Testing 145.0.6422.0" or "Chromium 145.0.6422.0"
         const versionMatch = versionOutput.match(/(\d+\.\d+\.\d+\.\d+)/);
         const chromeVersion = versionMatch ? versionMatch[1] : '131.0.0.0';
-        customUA = `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Safari/537.36 GStackBrowser`;
+        customUA = `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${chromeVersion} Safari/537.36`;
       } catch {
         // Fallback: generic modern Chrome UA
-        customUA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 GStackBrowser';
+        customUA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36';
       }
     }
 
+    // T1: strip Playwright's automation-tell defaults. STEALTH_IGNORE_DEFAULT_ARGS
+    // covers the originals (extension-loading blockers) plus --enable-automation
+    // (kills the "Chrome is being controlled by automated test software" infobar
+    // and the chrome-runtime shape changes Playwright otherwise triggers) and
+    // three more (--disable-popup-blocking, --disable-component-update,
+    // --disable-default-apps — each a documented automation tell per Patchright).
+    const { STEALTH_IGNORE_DEFAULT_ARGS } = await import('./stealth');
     this.context = await chromium.launchPersistentContext(userDataDir, {
       headless: false,
       args: launchArgs,
@@ -420,11 +433,7 @@ export class BrowserManager {
       userAgent: this.customUserAgent || customUA,
       ...(executablePath ? { executablePath } : {}),
       ...(this.proxyConfig ? { proxy: this.proxyConfig } : {}),
-      // Playwright adds flags that block extension loading
-      ignoreDefaultArgs: [
-        '--disable-extensions',
-        '--disable-component-extensions-with-background-pages',
-      ],
+      ignoreDefaultArgs: STEALTH_IGNORE_DEFAULT_ARGS,
     });
     this.browser = this.context.browser();
     this.connectionMode = 'headed';
@@ -1301,15 +1310,16 @@ export class BrowserManager {
       const userDataDir = path.join(process.env.HOME || '/tmp', '.gstack', 'chromium-profile');
       fs.mkdirSync(userDataDir, { recursive: true });
 
+      // T1: same automation-tell-stripping defaults as launchHeaded().
+      // The handoff path (headless → headed re-launch) takes the same
+      // anti-detection posture.
+      const { STEALTH_IGNORE_DEFAULT_ARGS } = await import('./stealth');
       newContext = await chromium.launchPersistentContext(userDataDir, {
         headless: false,
         args: launchArgs,
         viewport: null,
         ...(this.proxyConfig ? { proxy: this.proxyConfig } : {}),
-        ignoreDefaultArgs: [
-          '--disable-extensions',
-          '--disable-component-extensions-with-background-pages',
-        ],
+        ignoreDefaultArgs: STEALTH_IGNORE_DEFAULT_ARGS,
         timeout: 15000,
       });
     } catch (err: unknown) {
