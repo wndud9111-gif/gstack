@@ -821,7 +821,9 @@ BEFORE invoking the orchestrator:
   "Your brain queries (the `mcp__gbrain__*` tools) work via remote MCP, but
   symbol code search needs a local PGLite. Run `/setup-gbrain` and pick
   'Yes' at the new 'local code index' prompt (Step 4.5), or run
-  `gbrain init --pglite --json` directly. Continuing without code stage."
+  `gbrain init --pglite --json --embedding-model voyage:voyage-code-3 --embedding-dimensions 1024`
+  directly (drop the voyage flags if `VOYAGE_API_KEY` isn't set). Continuing
+  without code stage."
   Then proceed to Step 2 — the orchestrator's `runCodeImport()` and
   `runMemoryIngest()` will return SKIP per plan D12; only `runBrainSyncPush()`
   will run. Do NOT abort.
@@ -834,7 +836,8 @@ BEFORE invoking the orchestrator:
     1. Re-run /setup-gbrain — Step 1.5 offers Retry / Switch to PGLite /
        Switch brain mode / Quit (plan D4).
     2. Repair manually: mv ~/.gbrain/config.json ~/.gbrain/config.json.bak
-       && gbrain init --pglite --json
+       && gbrain init --pglite --json --embedding-model voyage:voyage-code-3 \
+          --embedding-dimensions 1024   (drop voyage flags if VOYAGE_API_KEY unset)
   Re-run /sync-gbrain after.
   ```
   Do NOT continue — the orchestrator would skip code+memory and only run
