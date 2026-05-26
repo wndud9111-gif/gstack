@@ -2,41 +2,21 @@
 
 ## design daemon: follow-ups (filed v1.45.0.0 via /ship review army)
 
-### P3: Tighten daemon test coverage
+### ✅ DONE (v1.45.0.0): Tighten daemon test coverage
 
-**What:** Three test gaps the testing specialist flagged on the v1.45.0.0 ship:
-
-1. `design/test/daemon.test.ts:441` (`bare GET /api/progress does NOT reset
-   meaningful activity`) is a smoke test pretending to be a behavioral test.
-   Its own body comment admits it can't read `lastMeaningfulActivity` in-process
-   and only asserts the endpoint stays functional. Move to
-   `daemon-discovery.test.ts` with `DESIGN_DAEMON_IDLE_MS=2000` +
-   `DESIGN_DAEMON_CHECK_MS=200`, poll `/api/progress` in a loop, wait
-   `IDLE_MS+CHECK_MS`, assert the daemon process actually exited.
-
-2. `design/test/daemon-discovery.test.ts:14` docstring claims a
-   "concurrent-CLIs race (two real subprocesses, one wins the lock)" test
-   exists. It doesn't. Add one: fire two `ensureDaemon()` calls in parallel
-   against the same stateFile via `Promise.all` (or two real subprocesses);
-   assert both resolve to the same port, exactly one `spawned=true`, exactly
-   one daemon process alive, no orphaned lock file. This is the primary
-   correctness gate for the new daemon's spawn-vs-attach race.
-
-3. `design/test/daemon.test.ts:462` `idleCheckTick` only has a "callable
-   without throwing" smoke. The 24h-extension-with-active-boards path
-   (`daemon.ts:240-252`) and the `MAX_EXTENSIONS` hard ceiling
-   (`daemon.ts:244-247`, force-shutdown after 4 extensions) are untested.
-   Both are load-bearing for the 24h timeout this PR ships.
-
-Plus: missing malformed-JSON tests for `POST /api/boards` and
-`POST /boards/<id>/api/reload` (only feedback has one); missing stale-lock
-reclaim test (`daemon-state.ts:208-213` PID-dead branch is only exercised
-indirectly).
-
-**Pros:** Closes real coverage gaps that ship-time review surfaced. Each test
-is small (one or two `it()` blocks).
-
-**Cons:** None — these are additive tests, no behavior change.
+**Resolved in commit `6b037c55` (same PR):** All 5 test gaps filled before
+landing. Per-file totals after: serve 16, daemon 34, daemon-discovery 23,
+feedback-roundtrip-daemon 4 = 77 (+10 from initial ship). Specifically:
+- Idle-shutdown actually fires (spawn-based, daemon process observed exiting,
+  state file removed).
+- Bare GET polling doesn't reset idle (hammers `/api/progress` in background,
+  daemon still idles out).
+- Idle-with-active-boards extends, then force-shuts after MAX_EXTENSIONS
+  (with `DESIGN_DAEMON_EXTENSION_MS=1500` + `MAX_EXTENSIONS=2`).
+- Concurrent `ensureDaemon()` race converges on one daemon (lock wins).
+- Stale-lock reclaim (dead PID succeeds, alive unrelated PID refuses).
+- Malformed-JSON + non-object + array-body + missing-html negatives for
+  `POST /api/boards` and `POST /boards/<id>/api/reload`.
 
 ### P3: Minor maintainability nits from /ship review
 

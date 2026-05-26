@@ -17,18 +17,18 @@ Source: `bun test design/test/` and `git diff origin/main...HEAD --stat`.
 | Idle timeout per board                  | 10 minutes    | 24 hours      | 144×           |
 | Server processes for N boards           | N             | 1             | N×             |
 | Browser tabs to keep open               | one per board | one total     | N×             |
-| Design tests in repo                    | 16            | 67            | +51            |
+| Design tests in repo                    | 16            | 77            | +61            |
 | Test paths covered (failure modes)      | not enumerated| 38 / 100%     | full coverage  |
 | Plan-review findings absorbed pre-impl  | 2             | 19            | 17× from Codex |
 
 | Component                  | New lines | Test lines |
 |----------------------------|-----------|------------|
-| design/src/daemon.ts       | ~580      | 30 tests   |
-| design/src/daemon-client.ts| ~340      | 17 tests   |
-| design/src/daemon-state.ts | ~180      | (via client + daemon tests) |
+| design/src/daemon.ts       | ~580      | 34 tests   |
+| design/src/daemon-client.ts| ~340      | 23 tests   |
+| design/src/daemon-state.ts | ~180      | (via client + daemon tests; direct stale-lock reclaim coverage) |
 | Browser round-trip via HTTP| (existed) | 4 tests    |
 
-The compression: 51 new tests cover every endpoint, lifecycle path, LRU eviction, idle handling, identity-verified spawn, version mismatch with and without active boards, PID-reuse safety, path traversal rejection, and cross-board feedback isolation. The plan-review pass caught 2 architectural issues in-house; an outside Codex pass caught 17 more, all absorbed into the implementation before any code was written. The version-mismatch path now refuses to silently kill a daemon with active boards (it prints a warning and exits 1), so upgrading gstack mid-design-session doesn't drop your in-memory board history.
+The compression: 61 new tests cover every endpoint, lifecycle path, LRU eviction, real idle-shutdown behavior (spawn-based, daemon process observed exiting after `IDLE_MS`), the bare-GET-doesn't-reset-idle invariant (poll loop in background, daemon still idles out), the idle-with-active-boards extension path with `MAX_EXTENSIONS` hard ceiling, concurrent-CLIs lock race (two parallel `ensureDaemon` calls converge on one daemon), identity-verified spawn, version mismatch with and without active boards, PID-reuse safety, path traversal rejection, malformed-body negatives on every POST, and cross-board feedback isolation. The plan-review pass caught 2 architectural issues in-house; an outside Codex pass caught 17 more, all absorbed into the implementation before any code was written; the /ship review army caught 1 backwards-compat break in skill resolvers (fixed) + 5 deferred test gaps (filled). The version-mismatch path now refuses to silently kill a daemon with active boards (it prints a warning and exits 1), so upgrading gstack mid-design-session doesn't drop your in-memory board history.
 
 ### What this means for the builder
 
