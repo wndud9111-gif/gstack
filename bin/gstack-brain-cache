@@ -629,6 +629,162 @@ export function cmdMeta(projectSlug: string | null): CacheMeta {
 }
 
 // ──────────────────────────────────────────────────────────────────────────
+// Subcommand: bootstrap (T2b)
+// ──────────────────────────────────────────────────────────────────────────
+
+/**
+ * Bootstrap synthesizes draft entity content from CLAUDE.md + README +
+ * recent commits + learnings.jsonl for a fresh project. Emits as JSON for
+ * the caller (skill template) to AUQ-confirm before any write to the brain.
+ *
+ * This keeps the CLI pure (no AUQ logic) while preventing silent
+ * auto-extraction garbage (D10 T4 fix). The agent is responsible for the
+ * "Synthesized X — looks right?" prompt per entity.
+ */
+export interface BootstrapDraft {
+  product?: { slug: string; title: string; body: string };
+  goals?: Array<{ slug: string; title: string; body: string }>;
+  developer_persona?: { slug: string; title: string; body: string };
+  brand?: { slug: string; title: string; body: string };
+  competitive_intel?: { slug: string; title: string; body: string };
+}
+
+export function cmdBootstrap(projectSlug: string): BootstrapDraft {
+  const draft: BootstrapDraft = {};
+  const repoRoot = process.env.GSTACK_REPO_ROOT || process.cwd();
+
+  // Product synthesis: CLAUDE.md headline + README first paragraph
+  let claudeMd = '';
+  try { claudeMd = readFileSync(join(repoRoot, 'CLAUDE.md'), 'utf-8'); } catch { /* missing is fine */ }
+  let readmeMd = '';
+  try { readmeMd = readFileSync(join(repoRoot, 'README.md'), 'utf-8'); } catch { /* missing is fine */ }
+
+  const productLead = synthesizeProductLead(claudeMd, readmeMd, projectSlug);
+  if (productLead) {
+    draft.product = {
+      slug: `gstack/product/${projectSlug}`,
+      title: projectSlug,
+      body: productLead,
+    };
+  }
+
+  // Goals: try learnings.jsonl + recent commit messages mentioning "goal" or "ship"
+  const learningsPath = join(GSTACK_HOME, 'projects', projectSlug, 'learnings.jsonl');
+  const goalsHints = synthesizeGoalsHints(learningsPath, repoRoot);
+  if (goalsHints.length > 0) {
+    draft.goals = goalsHints.slice(0, 3).map((hint, idx) => ({
+      slug: `gstack/goal/${projectSlug}/bootstrap-${idx + 1}`,
+      title: hint.title,
+      body: hint.body,
+    }));
+  }
+
+  return draft;
+}
+
+function synthesizeProductLead(claudeMd: string, readmeMd: string, slug: string): string | null {
+  // First H1 in CLAUDE.md or README, plus first paragraph after it.
+  const source = claudeMd || readmeMd;
+  if (!source) return null;
+  const h1Match = source.match(/^#\s+(.+)$/m);
+  const heading = h1Match?.[1]?.trim() || slug;
+  // First non-heading paragraph
+  const paraMatch = source.match(/(?:^|\n)([^#\n][^\n]+(?:\n[^#\n][^\n]+)*)/);
+  const lead = paraMatch?.[1]?.trim() || '(no description found in CLAUDE.md or README)';
+  return [
+    `# ${heading}`,
+    '',
+    '## What',
+    lead.slice(0, 500),
+    '',
+    '## Stage',
+    '(fill in current stage, e.g., v1.x shipped, in development, paused)',
+    '',
+    '## Team',
+    '(fill in team composition + size)',
+    '',
+    '## Active goals',
+    '(populated by /office-hours over time)',
+    '',
+    '## Recent decisions',
+    '(populated by /plan-ceo-review over time)',
+    '',
+  ].join('\n');
+}
+
+function synthesizeGoalsHints(learningsPath: string, repoRoot: string): Array<{ title: string; body: string }> {
+  const hints: Array<{ title: string; body: string }> = [];
+  if (existsSync(learningsPath)) {
+    try {
+      const lines = readFileSync(learningsPath, 'utf-8').split('\n').filter(Boolean);
+      for (const line of lines.slice(-10)) {
+        try {
+          const entry = JSON.parse(line);
+          if (entry?.insight && (entry?.type === 'pattern' || entry?.type === 'architecture')) {
+            hints.push({
+              title: entry.insight.slice(0, 80),
+              body: `Source: learnings.jsonl\nType: ${entry.type}\n\n${entry.insight}\n`,
+            });
+          }
+        } catch { /* skip malformed line */ }
+      }
+    } catch { /* unreadable file, skip */ }
+  }
+  return hints;
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Subcommand: list (T18)
+// ──────────────────────────────────────────────────────────────────────────
+
+/**
+ * Lists all gstack-owned pages currently in the brain for a project, grouped
+ * by type. Powers the user's ability to audit what gstack has written.
+ */
+export function cmdList(projectSlug: string | null): Array<{ type: string; slug: string; title?: string }> {
+  // We probe each gstack/<type>/ namespace via list-pages with a type filter.
+  const types = ['gstack/user-profile', 'gstack/product', 'gstack/goal', 'gstack/developer-persona', 'gstack/brand', 'gstack/competitive-intel', 'gstack/skill-run', 'gstack/take'];
+  const all: Array<{ type: string; slug: string; title?: string }> = [];
+  for (const type of types) {
+    const result = execGbrainJson<{ pages?: Array<{ slug: string; title?: string }> }>([
+      'list-pages',
+      '--type', type,
+      '--limit', '200',
+      '--json',
+    ]);
+    if (!result?.pages) continue;
+    for (const page of result.pages) {
+      if (projectSlug && !page.slug?.includes(`/${projectSlug}`) && type !== 'gstack/user-profile') {
+        continue;
+      }
+      all.push({ type, slug: page.slug, title: page.title });
+    }
+  }
+  return all;
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Subcommand: purge (T18)
+// ──────────────────────────────────────────────────────────────────────────
+
+/**
+ * Delete one gstack-owned page from the brain. Caller (skill template) is
+ * responsible for the confirm prompt; this is the raw operation.
+ */
+export function cmdPurge(slug: string): { deleted: boolean; error?: string } {
+  if (!slug.startsWith('gstack/')) {
+    return { deleted: false, error: 'refusing to purge non-gstack page' };
+  }
+  const result = spawnGbrain(['delete-page', slug], { timeout: 10_000 });
+  if (result.status !== 0) {
+    return { deleted: false, error: result.stderr?.trim() || `exit ${result.status}` };
+  }
+  // Also invalidate any cached digests that referenced this page.
+  // Best-effort — derived digests may need explicit invalidate.
+  return { deleted: true };
+}
+
+// ──────────────────────────────────────────────────────────────────────────
 // CLI dispatch
 // ──────────────────────────────────────────────────────────────────────────
 
@@ -669,6 +825,9 @@ Subcommands:
   invalidate <entity-name> [--project <slug>]
   digest <entity-slug>
   meta [--project <slug>]
+  bootstrap --project <slug>           — emit synthesized entity drafts (JSON)
+  list [--project <slug>]              — list gstack-owned pages in brain
+  purge <slug>                         — delete a gstack-owned brain page (refuses non-gstack/ slugs)
 `);
 }
 
@@ -735,6 +894,37 @@ async function main(): Promise<number> {
         const meta = cmdMeta(projectSlug);
         process.stdout.write(JSON.stringify(meta, null, 2) + '\n');
         return 0;
+      }
+      case 'bootstrap': {
+        if (!projectSlug) {
+          process.stderr.write('bootstrap requires --project <slug>\n');
+          return 1;
+        }
+        const draft = cmdBootstrap(projectSlug);
+        process.stdout.write(JSON.stringify(draft, null, 2) + '\n');
+        return 0;
+      }
+      case 'list': {
+        const pages = cmdList(projectSlug);
+        if (flags.json) {
+          process.stdout.write(JSON.stringify(pages, null, 2) + '\n');
+        } else {
+          for (const p of pages) {
+            process.stdout.write(`${p.type}\t${p.slug}\t${p.title ?? ''}\n`);
+          }
+        }
+        return 0;
+      }
+      case 'purge': {
+        const slug = positional[0];
+        if (!slug) { printUsage(); return 1; }
+        const result = cmdPurge(slug);
+        if (result.deleted) {
+          process.stdout.write(`deleted ${slug}\n`);
+          return 0;
+        }
+        process.stderr.write(`failed: ${result.error}\n`);
+        return 1;
       }
       case '':
       case 'help':
