@@ -746,7 +746,9 @@ This review report at the bottom of the plan is the MOST IMPORTANT deliverable o
     // bullet of an UNRESOLVED DECISIONS block, with nothing (CODEX/CROSS-MODEL/VERDICT/
     // prose) after it.
     expect(afterReport).toContain('UNRESOLVED DECISIONS');
-    const nonEmpty = planContent.split('\n').map(l => l.trim()).filter(l => l !== '');
+    // Compute from afterReport (the report section to EOF), not the whole file, so a
+    // mid-file report surfaces the real trailing content in the failure message.
+    const nonEmpty = afterReport.split('\n').map(l => l.trim()).filter(l => l !== '');
     const lastLine = nonEmpty[nonEmpty.length - 1];
     const isSentinel = lastLine === 'NO UNRESOLVED DECISIONS';
     const isUnresolvedBullet =
