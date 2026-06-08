@@ -1317,6 +1317,7 @@ fi
 # already registered under that tag, the install is a no-op (no prompt).
 PLAN_TUNE_LOG_HOOK="$SOURCE_GSTACK_DIR/hosts/claude/hooks/question-log-hook"
 PLAN_TUNE_PREF_HOOK="$SOURCE_GSTACK_DIR/hosts/claude/hooks/question-preference-hook"
+AUQ_ERROR_FALLBACK_HOOK="$SOURCE_GSTACK_DIR/hosts/claude/hooks/auq-error-fallback-hook"
 PLAN_TUNE_INSTALL_MARKER="$HOME/.gstack/.plan-tune-hooks-prompted"
 
 if [ "$NO_TEAM_MODE" -ne 1 ] \
@@ -1364,6 +1365,17 @@ if [ "$NO_TEAM_MODE" -ne 1 ] \
       --command "$PLAN_TUNE_PREF_HOOK" \
       --source plan-tune-cathedral \
       --timeout 5
+    # AUQ-failure prose-fallback reliability hook (OV3:B). Fires only when an
+    # AskUserQuestion call returns an error/missing result; inert on success and
+    # inert if the platform doesn't invoke PostToolUse on tool errors.
+    if [ -x "$AUQ_ERROR_FALLBACK_HOOK" ]; then
+      "$SETTINGS_HOOK" add-event \
+        --event PostToolUse \
+        --matcher '(AskUserQuestion|mcp__.*__AskUserQuestion)' \
+        --command "$AUQ_ERROR_FALLBACK_HOOK" \
+        --source plan-tune-cathedral \
+        --timeout 5
+    fi
   }
 
   if [ "$ALREADY_INSTALLED" -eq 1 ]; then
