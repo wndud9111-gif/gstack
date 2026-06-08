@@ -75,3 +75,17 @@ describe('.gitignore: render dir is declared untracked', () => {
     expect(read('.gitignore')).toContain('.claude/gstack-rendered/');
   });
 });
+
+describe('dev-skill: refreshes the render on template change', () => {
+  const devSkill = read('scripts/dev-skill.ts');
+
+  test('re-renders the :user variant into the workspace render dir', () => {
+    expect(devSkill).toContain('gstack-rendered');
+    expect(devSkill).toContain('--out-dir');
+    expect(devSkill).toContain('--respect-detection');
+  });
+
+  test('only refreshes when the render dir already exists (never creates it during plain dev)', () => {
+    expect(devSkill).toContain('fs.existsSync(RENDER_DIR)');
+  });
+});
