@@ -205,13 +205,7 @@ export function runParityChecks(opts: {
  * from the size-budget / static / behavioral guards.
  */
 const MONOLITH_INVARIANTS: ParityInvariant[] = [
-  {
-    skill: 'cso',
-    mustContain: ['OWASP', 'STRIDE', 'daily', 'comprehensive', 'verif'],
-    mustHaveHeadings: ['## Preamble', '## When to invoke'],
-    maxSizeRatio: 1.05,
-    minBytes: 30_000,
-  },
+  // cso is now carved — its invariant is generated from CARVE_GUARDS below.
   {
     skill: 'review',
     mustContain: ['confidence', 'P1', 'P2'],

@@ -32,6 +32,14 @@ export interface CarveStaticInvariants {
    */
   mustStayInSkeleton: string[];
   /**
+   * Substrings that MUST appear in the skeleton BEFORE the first STOP-Read
+   * (earliest-use, codex #6). For cso: mode-dispatch directives (## Arguments,
+   * ## Mode Resolution) must be resolved before any section is read — a dispatch
+   * directive stranded after the STOP can't govern which sections to read.
+   * Empty/undefined = skip (most skills).
+   */
+  mustPrecedeStop?: string[];
+  /**
    * Substrings that MUST be in the union (skeleton + sections) but MUST NOT be in
    * the skeleton — i.e. the heavy body that the carve relocated. Empty = skip.
    */
@@ -224,6 +232,38 @@ export const CARVE_GUARDS: Record<string, CarveGuard> = {
     maxSkeletonBytes: 64_000,
     minUnionBytes: 72_000,
     mustContain: ['Typography', 'Color', 'Aesthetic Direction'],
+  },
+  cso: {
+    skill: 'cso',
+    expectedSections: ['audit-phases.md'],
+    requiredReads: ['audit-phases.md'],
+    scenario:
+      'Run a security audit on this repository in --owasp mode (OWASP Top 10 only). Resolve the mode, do the Phase 0 stack detection and Phase 1 attack-surface census, then run the scoped audit phases and produce the findings report. Skip any step that needs network access.',
+    staticInvariants: {
+      // Dispatch + always-run + FP-filtering phases are ALWAYS loaded (security).
+      mustStayInSkeleton: [
+        '## Arguments',
+        '## Mode Resolution',
+        '### Phase 0',
+        '### Phase 1',
+        '### Phase 12',
+        '### Phase 13',
+        '### Phase 14',
+      ],
+      // Earliest-use: mode must be resolvable before any section is read (codex #6).
+      mustPrecedeStop: ['## Arguments', '## Mode Resolution'],
+      // Scope-dependent audit detail moved to the section.
+      mustMoveToSection: [
+        '### Phase 2: Secrets Archaeology',
+        '### Phase 9: OWASP Top 10 Assessment',
+        '### Phase 10: STRIDE Threat Model',
+      ],
+      gateAfterStop: undefined,
+    },
+    behavioral: 'prompt',
+    maxSkeletonBytes: 70_000,
+    minUnionBytes: 72_000,
+    mustContain: ['OWASP', 'STRIDE', 'daily', 'comprehensive', 'verif'],
   },
 };
 

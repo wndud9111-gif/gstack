@@ -88,6 +88,19 @@ export function checkOrdering(root: string, guard: CarveGuard): string[] {
     }
   }
 
+  // 3b. Earliest-use: dispatch directives must appear BEFORE the first STOP
+  // (codex #6 — a directive that governs which sections to read can't sit after
+  // the STOP that reads them).
+  const firstStopIdx = skeleton.indexOf(STOP);
+  for (const anchor of guard.staticInvariants.mustPrecedeStop ?? []) {
+    const at = skeleton.indexOf(anchor);
+    if (at < 0) {
+      failures.push(`mustPrecedeStop anchor missing from skeleton: "${anchor}"`);
+    } else if (firstStopIdx >= 0 && at > firstStopIdx) {
+      failures.push(`mustPrecedeStop anchor "${anchor}" appears AFTER the STOP (stranded)`);
+    }
+  }
+
   // 4. Heavy body moved out of the skeleton but is preserved in the union.
   for (const moved of guard.staticInvariants.mustMoveToSection) {
     if (skeleton.includes(moved)) {
