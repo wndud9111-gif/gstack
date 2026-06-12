@@ -839,13 +839,20 @@ the run can also die to idle-sleep. `gstack-detach` fixes both: a fresh session
 (escapes the group SIGTERM) wrapped in `caffeinate -i` (blocks idle-sleep).
 
 - Use the `eval:bg*` scripts (`eval:bg`, `eval:bg:all`, `eval:bg:gate`,
-  `eval:bg:periodic`) — they wrap the eval command in `gstack-detach` and stream to
-  `/tmp/gstack-evals.log`. Or call `gstack-detach <log> -- <cmd>` directly for any
-  long agent job. Export `ANTHROPIC_API_KEY` first (never pass keys in argv).
-- Then **poll the logfile** with a death-aware watcher: break on a `### DONE ###` /
-  `EXIT=` marker OR on "runner process gone before DONE" (silence is not success —
-  cover the crash/kill path, not just the happy path). The detached run survives
+  `eval:bg:periodic`) — they wrap the eval command in `gstack-detach` with the
+  machine-wide `gstack-evals` lock (concurrent worktrees serialize instead of
+  saturating the shared model API), a per-tier watchdog, and a **run-scoped** log
+  under `~/.gstack-dev/eval-runs/` (no shared-`/tmp` collision). Each prints its
+  log path. Or call `gstack-detach [--lock NAME] [--timeout SECS] [--label LBL] --
+  <cmd>` directly for any long agent job. Export `ANTHROPIC_API_KEY` first (never
+  pass keys in argv).
+- Then **poll the printed logfile** with a death-aware watcher: break on the
+  guaranteed `### gstack-detach EXIT=<code> ###` sentinel (success AND failure are
+  both marked, so silence is never mistaken for success). The detached run survives
   even if your watcher gets reaped, so re-checking the log always works.
+- Why the lock: a shared dev box with several Conductor worktrees will rate-limit
+  the model API if two eval suites run at once (15-way concurrency each), which
+  mass-times-out E2E tests. The lock makes the second run WAIT, not collide.
 - Humans running `bun run test:evals` foreground in their own terminal don't need
   this — Ctrl-C is intended there. Detachment is for agent-launched runs only.
 
