@@ -34,6 +34,7 @@ declare global {
     __mermaidToExcalidraw: (text: string) => Promise<string>;
     __excalidrawToSvg: (sceneJson: string) => Promise<string>;
     __rasterize: (svgText: string, targetWidthPx: number) => Promise<string>;
+    __downscaleRaster: (dataUri: string, targetWidthPx: number, mime: string) => Promise<string>;
     __mountForScreenshot: (svgText: string, targetWidthPx: number) => string;
     __probeImage: (src: string) => Promise<string>;
     EXCALIDRAW_ASSET_PATH?: string;
@@ -150,6 +151,37 @@ window.__mountForScreenshot = (svgText: string, targetWidthPx: number): string =
   }
   document.body.appendChild(stage);
   return `mounted:${targetWidthPx}`;
+};
+
+/**
+ * Downscale a raster image (data URI) to targetWidthPx, preserving aspect.
+ * Re-encodes in the requested mime — JPEG photos stay JPEG (q0.9); PNG-encoding
+ * a photo would bloat it past the original. Data URIs are same-origin, so the
+ * canvas never taints.
+ */
+window.__downscaleRaster = async (
+  dataUri: string,
+  targetWidthPx: number,
+  mime: string,
+): Promise<string> => {
+  if (!(targetWidthPx > 0 && targetWidthPx <= 10000)) {
+    throw new Error(`targetWidthPx out of range: ${targetWidthPx}`);
+  }
+  const img = new Image();
+  await new Promise<void>((resolve, reject) => {
+    img.onload = () => resolve();
+    img.onerror = () => reject(new Error("image decode failed"));
+    img.src = dataUri;
+  });
+  const scale = targetWidthPx / (img.naturalWidth || targetWidthPx);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(img.naturalWidth * scale);
+  canvas.height = Math.round(img.naturalHeight * scale);
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("2d canvas context unavailable");
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  const outMime = mime === "image/jpeg" ? "image/jpeg" : "image/png";
+  return outMime === "image/jpeg" ? canvas.toDataURL(outMime, 0.9) : canvas.toDataURL(outMime);
 };
 
 /** Probe intrinsic dimensions of an image (data URI or URL). Returns JSON. */
