@@ -209,6 +209,10 @@ describe('gcStaleHermeticDirs', () => {
     const foreign = path.join(tmp, 'unrelated-dir');
     const malformed = path.join(tmp, 'gstack-hermetic-notapid-abc');
     for (const d of [dead, live, foreign, malformed]) fs.mkdirSync(d);
+    // GC only reclaims dirs older than its 1h age floor (PID-reuse guard);
+    // backdate the dead-pid dir's mtime so it qualifies.
+    const old = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    fs.utimesSync(dead, old, old);
 
     gcStaleHermeticDirs(tmp);
 
@@ -216,6 +220,17 @@ describe('gcStaleHermeticDirs', () => {
     expect(fs.existsSync(live)).toBe(true);
     expect(fs.existsSync(foreign)).toBe(true);
     expect(fs.existsSync(malformed)).toBe(true); // never guess on malformed names
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  test('keeps a fresh dead-pid dir (PID-reuse grace window)', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'hermetic-gc-fresh-'));
+    // Dead pid but just created — must survive GC, else PID reuse could delete
+    // a dir whose original pid exited and got recycled to a live process.
+    const freshDead = path.join(tmp, 'gstack-hermetic-99999999-xyz');
+    fs.mkdirSync(freshDead);
+    gcStaleHermeticDirs(tmp);
+    expect(fs.existsSync(freshDead)).toBe(true);
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 });

@@ -198,14 +198,22 @@ export function getHermeticDirs(): HermeticDirs {
   const gstackHome = path.join(runRoot, 'gstack-home');
 
   // A half-seeded config dir means children hang on first-run prompts until
-  // the test timeout — far worse than failing loudly here. No try/catch.
-  fs.mkdirSync(configDir, { recursive: true });
-  fs.mkdirSync(gstackHome, { recursive: true });
-  const seed = buildSeedConfig({
-    apiKey: process.env.ANTHROPIC_API_KEY ?? process.env.GSTACK_ANTHROPIC_API_KEY,
-    trustedDirs: [repoRoot()],
-  });
-  fs.writeFileSync(path.join(configDir, '.claude.json'), JSON.stringify(seed, null, 2));
+  // the test timeout — far worse than failing loudly here. So we throw on
+  // failure, but tear down the partial dir first: an unseeded runRoot named
+  // with our (alive) pid would be skipped by this process's GC and leak until
+  // process exit, so remove it before rethrowing.
+  try {
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.mkdirSync(gstackHome, { recursive: true });
+    const seed = buildSeedConfig({
+      apiKey: process.env.ANTHROPIC_API_KEY ?? process.env.GSTACK_ANTHROPIC_API_KEY,
+      trustedDirs: [repoRoot()],
+    });
+    fs.writeFileSync(path.join(configDir, '.claude.json'), JSON.stringify(seed, null, 2));
+  } catch (err) {
+    try { fs.rmSync(runRoot, { recursive: true, force: true }); } catch { /* best-effort */ }
+    throw err;
+  }
 
   process.on('exit', () => {
     // Exit handlers cannot await: sync best-effort removal only. Anything
@@ -217,21 +225,32 @@ export function getHermeticDirs(): HermeticDirs {
   return cachedDirs;
 }
 
+/** A dir younger than this is never GC'd even if its pid looks dead — guards
+ * against PID reuse deleting a freshly-created dir whose original pid exited
+ * and was recycled to an unrelated live process between create and GC. */
+const GC_MIN_AGE_MS = 60 * 60 * 1000; // 1h
+
 /**
- * Reclaim leftovers from crashed runs. Pid-aware, not age-based: a pure
- * age cutoff would delete a live >24h eval run's config out from under it.
- * Exported for tests.
+ * Reclaim leftovers from crashed runs. Two signals, both required: the
+ * embedded pid is dead AND the dir is older than GC_MIN_AGE_MS. Pid-alone
+ * would risk PID-reuse false-deletes of live dirs; age-alone would delete a
+ * live >24h eval run's config out from under it. Exported for tests.
  */
 export function gcStaleHermeticDirs(tmpDir: string = os.tmpdir()): void {
   let entries: string[];
   try { entries = fs.readdirSync(tmpDir); } catch { return; }
+  const now = Date.now();
   for (const name of entries) {
     if (!name.startsWith(DIR_PREFIX)) continue;
     const pidStr = name.slice(DIR_PREFIX.length).split('-')[0];
     const pid = Number(pidStr);
     if (!Number.isInteger(pid) || pid <= 0) continue;
     if (pid === process.pid || isProcessAlive(pid)) continue;
-    try { fs.rmSync(path.join(tmpDir, name), { recursive: true, force: true }); } catch { /* best-effort */ }
+    const full = path.join(tmpDir, name);
+    try {
+      if (now - fs.statSync(full).mtimeMs < GC_MIN_AGE_MS) continue; // too fresh
+    } catch { continue; } // vanished or unreadable — leave it
+    try { fs.rmSync(full, { recursive: true, force: true }); } catch { /* best-effort */ }
   }
 }
 
