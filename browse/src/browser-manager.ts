@@ -407,10 +407,11 @@ export class BrowserManager {
       await this.context.setExtraHTTPHeaders(this.extraHeaders);
     }
 
-    // D7: mask navigator.webdriver only. The other 3 wintermute patches
-    // (plugins, languages, chrome.runtime) are intentionally NOT applied —
-    // faking them to fixed values can flag more bot-like to modern
-    // fingerprinters, not less.
+    // Apply Layer C stealth (applyStealth): masks navigator.webdriver,
+    // restores window.chrome.* shape, aligns Notification.permission, sets
+    // per-install hardware, and strips automation globals + the Permissions
+    // notifications tell. We still do NOT fake navigator.plugins/languages —
+    // faking those to fixed values flags more bot-like, not less (D7).
     const { applyStealth } = await import('./stealth');
     await applyStealth(this.context);
 

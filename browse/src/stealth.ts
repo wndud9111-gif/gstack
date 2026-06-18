@@ -1,11 +1,15 @@
 /**
  * Stealth init script — Layer C of GBrowser's anti-detection plan.
  *
- * D7 (codex correction, kept): we DON'T fake navigator.plugins or
+ * D7 (codex correction, kept): Layer C (the always-on default built by
+ * buildStealthScript) does NOT fake navigator.plugins or
  * navigator.languages — modern fingerprinters cross-check those against
  * userAgent / platform / OS, and synthesizing fixed values flags MORE
  * bot-like, not less. Plugins and languages surface their native
- * Chromium values.
+ * Chromium values. The opt-in EXTENDED_STEALTH_SCRIPT below (gated on
+ * GSTACK_STEALTH=extended, off by default) DOES fake plugins — that mode
+ * is the documented "actively lies, may break sites" escape hatch, not
+ * the default posture.
  *
  * What this script DOES do (the new additions for Phase 1):
  *   1. Mask navigator.webdriver (the canonical headless tell).
