@@ -216,6 +216,24 @@ jobs:
             || { echo "ERROR: plan-ceo-review SKILL.md missing 'name: plan-ceo-review' frontmatter" >&2; exit 1; }
           echo "skill registry OK"
 
+      # TEMP DEBUG (remove after diagnosing pty-smoke discovery): the smoke fails
+      # with "Unknown command: /office-hours" even after retries (not a race).
+      # Capture what claude actually discovers in CI to fix the registry precisely.
+      - name: Debug skill discovery (pty smoke)
+        if: matrix.suite.name == 'e2e-pty-plan-smoke'
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          set +e
+          echo "=== claude version + binary ==="; command -v claude; claude --version 2>&1 | head -3
+          echo "=== HOME/CLAUDE/XDG env ==="; env | grep -iE '^(HOME|CLAUDE|XDG)=' || true
+          echo "=== ~/.claude/skills (top) ==="; ls -la "$HOME/.claude/skills" 2>&1 | head -30
+          echo "=== office-hours SKILL.md resolves? ==="; head -3 "$HOME/.claude/skills/office-hours/SKILL.md" 2>&1
+          echo "=== project .claude in cwd? ==="; ls -la "$GITHUB_WORKSPACE/.claude" 2>&1 | head
+          echo "=== claude -p probe (same discovery path) ==="
+          cd "$GITHUB_WORKSPACE"
+          timeout 90 claude -p "Reply with exactly the word READY and nothing else if the /office-hours slash command is available to you, otherwise reply MISSING." 2>&1 | tail -10
+
       - name: Run ${{ matrix.suite.name }}
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
