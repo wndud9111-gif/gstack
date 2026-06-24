@@ -202,7 +202,7 @@ jobs:
           # cross-mount symlink). Copy SKILL.md + sections as real files so the TUI
           # reads them directly.
           for s in office-hours plan-ceo-review; do
-            rm -rf "$SKILLS_DIR/$s"
+            rm -rf "${SKILLS_DIR:?}/$s"
             mkdir -p "$SKILLS_DIR/$s"
             cp "$REPO/$s/SKILL.md" "$SKILLS_DIR/$s/SKILL.md"
             cp -R "$REPO/$s/sections" "$SKILLS_DIR/$s/sections"
